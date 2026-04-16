@@ -80,8 +80,21 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
         
         if (end === -1) throw new Error("JSON incompleto en la respuesta");
         
-        const jsonString = text.substring(start, end + 1);
-        return JSON.parse(jsonString);
+        let jsonString = text.substring(start, end + 1);
+        
+        // Limpiar caracteres de control que rompen el JSON
+        jsonString = jsonString.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '');
+        
+        // Escapar saltos de línea dentro de strings
+        jsonString = jsonString.replace(/("(?:[^"\\]|\\.)*")/g, match => {
+          return match.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+        });
+        
+        try {
+          return JSON.parse(jsonString);
+        } catch(e: any) {
+          throw new Error("JSON inválido después de limpieza: " + e.message);
+        }
       };
 
       const parsedArtifact = extractJSON(result);
