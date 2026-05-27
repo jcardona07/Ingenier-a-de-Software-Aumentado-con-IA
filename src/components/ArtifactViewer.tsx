@@ -102,23 +102,50 @@ export const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, phaseId })
       );
 
     case 4: // Priorización
+      const backlog = data.prioritized_backlog || [];
+      const analysis = data.company_analysis || {};
+      
+      // Si la estructura normal falla o no hay análisis, mostrar lista simple de respaldo
+      if (backlog.length > 0 && !analysis.primary_pain) {
+        return (
+          <div className="space-y-4">
+            <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 rounded-lg">
+              <p className="text-yellow-400 text-sm font-bold">Modo de Respaldo: Priorización Detectada</p>
+            </div>
+            <div className="space-y-4">
+              {backlog.map((b: any, idx: number) => (
+                <div key={b.story_id || idx} className="glass-panel p-4 border-l-4 border-l-teal-400">
+                  <div className="font-bold text-white">Historia: {b.story_id} (Posición: {b.position})</div>
+                  <div className="text-sm text-slate-300 mt-1">{b.justification_company_specific || b.score_justification || b.explanation || "Sin justificación"}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="space-y-8">
           <div className="bg-teal-medium/30 p-6 rounded-xl border border-teal-400/20 space-y-6">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">Análisis de la Empresa</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {renderSection("Dolor Principal", <p className="text-sm">{data.company_analysis?.primary_pain}</p>)}
-              {renderSection("Usuario Crítico", <p className="text-sm">{data.company_analysis?.critical_user_profile}</p>)}
+              {renderSection("Dolor Principal", <p className="text-sm">{analysis.primary_pain || 'N/A'}</p>)}
+              {renderSection("Usuario Crítico", <p className="text-sm">{analysis.critical_user_profile || 'N/A'}</p>)}
             </div>
-            {renderSection("Restricciones No Negociables", renderList(data.company_analysis?.non_negotiable_constraints || []))}
+            {renderSection("Restricciones No Negociables", renderList(analysis.non_negotiable_constraints || []))}
           </div>
-          {renderSection("Backlog Priorizado", renderTable(["Pos", "Story ID", "WSJF", "Justificación"], (data.prioritized_backlog || []).map((b: any) => [b.position, b.story_id, b.wsjf_score, b.justification_company_specific])))}
+          {renderSection("Backlog Priorizado", renderTable(["Pos", "Story ID", "WSJF", "Justificación"], backlog.map((b: any) => [
+            b.position || '?', 
+            b.story_id || '?', 
+            b.wsjf_score || b.final_score || '?', 
+            b.justification_company_specific || b.score_justification || 'N/A'
+          ])))}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {['sprint_1', 'sprint_2', 'sprint_3'].map(s => (
               <div key={s} className="glass-panel p-4 space-y-2">
                 <div className="text-xs font-bold text-teal-400 uppercase">{s.replace('_', ' ')}</div>
-                <div className="text-sm font-bold text-white">{data.sprint_plan?.[s]?.goal}</div>
-                <div className="text-[10px] text-slate-400">{data.sprint_plan?.[s]?.total_points} SP ({data.sprint_plan?.[s]?.capacity_used_percent}%)</div>
+                <div className="text-sm font-bold text-white">{data.sprint_plan?.[s]?.goal || 'Pendiente'}</div>
+                <div className="text-[10px] text-slate-400">{data.sprint_plan?.[s]?.total_points || 0} SP ({data.sprint_plan?.[s]?.capacity_used_percent || 0}%)</div>
               </div>
             ))}
           </div>
@@ -127,18 +154,22 @@ export const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, phaseId })
 
     case 5: // Arquitectura
       const arch = data.architecture?.recommended || {};
+      const safeJoin = (val: any) => Array.isArray(val) ? val.join(', ') : '';
+      
       return (
         <div className="space-y-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderSection("Estilo Recomendado", <div className="space-y-2"><div className="text-lg font-bold text-white">{arch.style}</div><p className="text-sm">{arch.justification}</p></div>)}
-            {renderSection("Stack Técnico", renderTable(["Capa", "Tecnología"], [["Frontend", arch.frontend], ["Backend", arch.backend], ["Database", arch.database]]))}
+            {renderSection("Estilo Recomendado", <div className="space-y-2"><div className="text-lg font-bold text-white">{arch.style || 'N/A'}</div><p className="text-sm">{arch.justification || 'N/A'}</p></div>)}
+            {renderSection("Stack Técnico", renderTable(["Capa", "Tecnología"], [["Frontend", arch.frontend || 'N/A'], ["Backend", arch.backend || 'N/A'], ["Database", arch.database || 'N/A']]))}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {renderSection("Componentes IA", renderList(arch.ai_components || []))}
             {renderSection("Seguridad", renderList(arch.security_baseline || []))}
           </div>
-          {renderSection("Modelo de Datos", renderTable(["Entidad", "Atributos", "Relaciones"], (data.data_model?.entities || []).map((e: any) => [e.name, (e.attributes || []).join(', '), (e.relationships || []).join(', ')])))}
-          {renderSection("Alternativas", renderTable(["Nombre", "Pros", "Cons"], (data.alternatives || []).map((a: any) => [a.name, (a.pros || []).join(', '), (a.cons || []).join(', ')])))}
+          {renderSection("Modelo de Datos", renderTable(["Entidad", "Atributos", "Relaciones"], (data.data_model?.entities || []).map((e: any) => [e.name || 'N/A', safeJoin(e.attributes), safeJoin(e.relationships)])))}
+          {renderSection("Alternativas", renderTable(["Nombre", "Pros", "Cons"], (data.alternatives || []).map((a: any) => [a.name || 'N/A', safeJoin(a.pros), safeJoin(a.cons)])))}
+          {data.integrations && data.integrations.length > 0 && renderSection("Integraciones", renderTable(["Sistema", "Tipo", "Protocolo"], data.integrations.map((i: any) => [i.system || 'N/A', i.type || 'N/A', i.protocol || 'N/A'])))}
+          {data.security_decisions && data.security_decisions.length > 0 && renderSection("Decisiones de Seguridad", renderTable(["Decisión", "Razón"], data.security_decisions.map((d: any) => [d.decision || 'N/A', d.rationale || 'N/A'])))}
         </div>
       );
 
@@ -168,6 +199,19 @@ export const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, phaseId })
       );
 
     case 7: // Código
+      const totalFiles = (data.code_artifacts || []).reduce((acc: number, art: any) => acc + (art.files?.length || 0), 0);
+      
+      if (totalFiles === 0) {
+        return (
+          <div className="p-8 text-center space-y-4">
+            <div className="bg-red-500/10 border border-red-500/30 p-6 rounded-xl inline-block max-w-md">
+              <p className="text-red-400 font-bold text-lg mb-2">Error de Generación</p>
+              <p className="text-slate-400 text-sm">El agente no generó código, por favor rechaza y vuelve a ejecutar.</p>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="space-y-8">
           {(data.code_artifacts || []).map((art: any, i: number) => (

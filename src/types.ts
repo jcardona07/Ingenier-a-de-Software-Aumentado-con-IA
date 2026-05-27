@@ -10,8 +10,8 @@ export interface OrgContext {
   qualityStandards: string;
   definitionOfDone: string;
   constraints: string;
-  averageVelocity: number;
-  teamHistory: string;
+  averageVelocity?: number;
+  teamHistory?: string;
 }
 
 export type PhaseStatus = 'locked' | 'working' | 'waiting' | 'approved' | 'rejected';
@@ -34,6 +34,8 @@ export interface AppState {
   isGeminiVerified: boolean;
   isClaudeVerified: boolean;
   orgContext: OrgContext | null;
+  teamRepoUrl: string;
+  teamRepoContext: any | null;
   currentPhaseIndex: number;
   phases: Phase[];
   projectIdea: string;

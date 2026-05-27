@@ -21,6 +21,8 @@ export default function App() {
     isGeminiVerified: false,
     isClaudeVerified: false,
     orgContext: null,
+    teamRepoUrl: '',
+    teamRepoContext: null,
     currentPhaseIndex: 0,
     phases: INITIAL_PHASES,
     projectIdea: '',
@@ -59,8 +61,8 @@ export default function App() {
                 <BrainCircuit className="text-teal-dark" size={24} />
               </div>
               <div>
-                <h1 className="text-sm font-bold text-white leading-none">AI Lifecycle</h1>
-                <p className="text-[10px] text-teal-400 font-bold uppercase tracking-widest mt-1">Framework</p>
+                <h1 className="text-sm font-bold text-white leading-none">Software IA</h1>
+                <p className="text-[10px] text-teal-400 font-bold uppercase tracking-widest mt-1">Aumentada</p>
               </div>
             </div>
           </div>

@@ -37,9 +37,13 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
       const systemPrompt = (PROMPTS as any)[`AGENTE_${currentPhase.id}`];
       
       // Build context
-      let context = `PERFIL ORGANIZACIONAL:\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
-      context += `HISTORIAL DEL EQUIPO:\n${state.orgContext?.teamHistory}\n\n`;
-      context += `IDEA DEL PROYECTO:\n${state.projectIdea}\n\n`;
+      let context = `INFORMACIÓN DE CONTEXTO CRÍTICA (UTILIZA ESTOS DATOS PARA CUMPLIR ESTÁNDARES Y CONSISTENCIA):\n\n`;
+      context += `1. PERFIL ORGANIZACIONAL (Empresa, Sector, Stack, Estándares, DoD, Restricciones):\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
+      context += `2. HISTORIAL DEL EQUIPO (Contexto narrativo):\n${state.orgContext?.teamHistory}\n\n`;
+      if (state.teamRepoContext) {
+        context += `3. REPOSITORIO DEL EQUIPO (Datos estructurados JSON con antecedentes técnicos y de gestión):\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+      }
+      context += `4. IDEA DEL PROYECTO ACTUAL (Objetivo del ciclo):\n${state.projectIdea}\n\n`;
       
       // Accumulate approved artifacts
       state.phases.slice(0, state.currentPhaseIndex).forEach(p => {
@@ -54,50 +58,100 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
 
       const userPrompt = "Genera el artefacto para esta fase basándote en el contexto proporcionado.";
       
+      if (currentPhase.id === 4) {
+        console.log("Agente 4 iniciado");
+      }
+
       let result = "";
+      const runWithTimeout = async (promise: Promise<string>, seconds: number) => {
+        let timeoutId: any;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("El agente tardó demasiado, intenta de nuevo"));
+          }, seconds * 1000);
+        });
+        
+        try {
+          const res = await Promise.race([promise, timeoutPromise]);
+          clearTimeout(timeoutId);
+          return res;
+        } catch (e) {
+          clearTimeout(timeoutId);
+          throw e;
+        }
+      };
+
       if (model === 'Gemini') {
-        result = await callGemini(apiKey, systemPrompt, context + userPrompt);
+        const promise = callGemini(apiKey, systemPrompt, context + userPrompt);
+        result = currentPhase.id === 4 ? await runWithTimeout(promise, 90) : await promise;
       } else {
-        result = await callClaude(apiKey, systemPrompt, context + userPrompt);
+        const promise = callClaude(apiKey, systemPrompt, context + userPrompt);
+        result = currentPhase.id === 4 ? await runWithTimeout(promise, 90) : await promise;
+      }
+
+      if (currentPhase.id === 4) {
+        console.log("Agente 4 respuesta recibida");
       }
 
       // Robust JSON Extraction
       const extractJSON = (text: string) => {
-        // Busca el primer { o [ y el último } o ]
+        text = text.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '');
+        
         const firstBrace = text.indexOf('{');
         const firstBracket = text.indexOf('[');
-        
         let start = -1;
         if (firstBrace === -1) start = firstBracket;
         else if (firstBracket === -1) start = firstBrace;
         else start = Math.min(firstBrace, firstBracket);
         
-        if (start === -1) throw new Error("No se encontró JSON en la respuesta");
+        if (start === -1) throw new Error("No se encontro JSON");
         
-        const lastBrace = text.lastIndexOf('}');
-        const lastBracket = text.lastIndexOf(']');
-        const end = Math.max(lastBrace, lastBracket);
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+        let end = -1;
+        const openChar = text[start];
+        const closeChar = openChar === '{' ? '}' : ']';
         
-        if (end === -1) throw new Error("JSON incompleto en la respuesta");
+        for (let i = start; i < text.length; i++) {
+          const c = text[i];
+          if (escape) { escape = false; continue; }
+          if (c === '\\' && inString) { escape = true; continue; }
+          if (c === '"') { inString = !inString; continue; }
+          if (inString) continue;
+          if (c === openChar || c === '{' || c === '[') depth++;
+          if (c === closeChar || c === '}' || c === ']') {
+            depth--;
+            if (depth === 0) { end = i; break; }
+          }
+        }
+        
+        if (end === -1) throw new Error("JSON incompleto");
         
         let jsonString = text.substring(start, end + 1);
-        
-        // Limpiar caracteres de control que rompen el JSON
-        jsonString = jsonString.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '');
-        
-        // Escapar saltos de línea dentro de strings
-        jsonString = jsonString.replace(/("(?:[^"\\]|\\.)*")/g, match => {
-          return match.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
-        });
+        jsonString = jsonString.replace(/("(?:[^"\\]|\\.)*")/g, match =>
+          match.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
+        );
+        jsonString = jsonString.replace(/,(\s*[}\]])/g, '$1');
         
         try {
           return JSON.parse(jsonString);
         } catch(e: any) {
-          throw new Error("JSON inválido después de limpieza: " + e.message);
+          throw new Error("JSON invalido despues de limpieza: " + e.message);
         }
       };
 
+      if (currentPhase.id === 4) {
+        console.log("RESPUESTA CRUDA AGENTE 4:", result);
+      }
+
       const parsedArtifact = extractJSON(result);
+
+      if (currentPhase.id === 4) {
+        console.log("OBJETO JSON PARSEADO AGENTE 4:", parsedArtifact);
+      }
+
+      console.log(`JSON Devuelto por el Agente ${currentPhase.id}:`, JSON.stringify(parsedArtifact, null, 2));
 
       setState(prev => {
         const newPhases = [...prev.phases];
@@ -205,9 +259,9 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
         </div>
 
         {error && (
-          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 text-red-400 text-sm">
-            <AlertTriangle size={18} className="shrink-0" />
-            <p>{error}</p>
+          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 text-red-400 text-sm whitespace-pre-wrap">
+            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+            <p className="flex-1">{error}</p>
           </div>
         )}
       </div>

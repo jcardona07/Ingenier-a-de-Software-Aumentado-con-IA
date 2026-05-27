@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AppState, OrgContext } from '../types';
 import { testGeminiConnection, testClaudeConnection } from '../services/aiService';
-import { CheckCircle2, XCircle, Info, ShieldCheck, Zap, Database, History, Settings, Users } from 'lucide-react';
+import { CheckCircle2, XCircle, Info, ShieldCheck, Zap, Database, History, Settings, Users, Upload, Link, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface SetupScreenProps {
@@ -16,6 +16,10 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
   const [geminiError, setGeminiError] = useState<string | null>(null);
   const [claudeError, setClaudeError] = useState<string | null>(null);
 
+  const [orgError, setOrgError] = useState<string | null>(null);
+  const [fetchingRepo, setFetchingRepo] = useState(false);
+  const [parsingFile, setParsingFile] = useState(false);
+
   const [orgForm, setOrgForm] = useState<OrgContext>({
     companyName: '',
     industry: '',
@@ -27,18 +31,133 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
     teamHistory: '',
   });
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setParsingFile(true);
+    setOrgError(null);
+
+    try {
+      const text = await file.text();
+      let data: any;
+
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        // If not JSON, try to use Gemini to extract info if key is available
+        if (state.isGeminiVerified) {
+          const prompt = `Actúa como un experto en análisis organizacional. Extrae la información del siguiente texto y devuélvela estrictamente en formato JSON.
+          Si algún campo no se encuentra, deja el valor vacío o el valor predeterminado sugerido.
+          
+          Estructura requerida:
+          {
+            "companyName": "Nombre de la empresa",
+            "industry": "Sector o industria",
+            "techStack": "Tecnologías mencionadas",
+            "qualityStandards": "Estándares de calidad o procesos",
+            "definitionOfDone": "Definición de terminado",
+            "constraints": "Restricciones de tiempo, presupuesto o técnica",
+            "averageVelocity": número (velocidad del equipo),
+            "teamHistory": "Resumen de la historia del equipo",
+            "projectIdea": "Descripción de la idea de proyecto si se menciona"
+          }
+          
+          Texto a analizar:
+          ${text}`;
+
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${state.geminiKey.trim()}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }]
+            })
+          });
+
+          const resData = await response.json();
+          if (response.ok && resData.candidates && resData.candidates[0]?.content?.parts[0]?.text) {
+            let rawText = resData.candidates[0].content.parts[0].text;
+            
+            // Limpiar markdown si el modelo lo incluye
+            rawText = rawText.replace(/```json\s?/, '').replace(/```/, '').trim();
+            
+            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              try {
+                data = JSON.parse(jsonMatch[0]);
+              } catch (parseErr) {
+                // Intento secundario: limpiar caracteres de control
+                const cleanJson = jsonMatch[0].replace(/[\x00-\x1F\x7F-\x9F]/g, "");
+                data = JSON.parse(cleanJson);
+              }
+            } else {
+              throw new Error("No se pudo encontrar un bloque JSON en la respuesta de la IA.");
+            }
+          } else {
+            const errorMsg = resData.error?.message || "Error desconocido en la API de Gemini";
+            throw new Error(`Error de Gemini: ${errorMsg}`);
+          }
+        } else {
+          throw new Error("El archivo no es un JSON válido. Por favor conecta Gemini primero para procesar archivos de texto plano.");
+        }
+      }
+
+      if (data) {
+        setOrgForm(prev => ({
+          ...prev,
+          companyName: data.companyName || prev.companyName,
+          industry: data.industry || prev.industry,
+          techStack: data.techStack || prev.techStack,
+          qualityStandards: data.qualityStandards || prev.qualityStandards,
+          definitionOfDone: data.definitionOfDone || prev.definitionOfDone,
+          constraints: data.constraints || prev.constraints,
+          averageVelocity: typeof data.averageVelocity === 'number' ? data.averageVelocity : prev.averageVelocity,
+          teamHistory: data.teamHistory || prev.teamHistory,
+        }));
+        if (data.projectIdea) {
+          setState(prev => ({ ...prev, projectIdea: data.projectIdea }));
+        }
+      }
+    } catch (err: any) {
+      console.error("Error en handleFileUpload:", err);
+      setOrgError(err.message || "Error al procesar el archivo");
+    } finally {
+      setParsingFile(false);
+    }
+  };
+
+  const handleFetchRepo = async () => {
+    if (!state.teamRepoUrl) return;
+
+    setFetchingRepo(true);
+    setOrgError(null);
+
+    try {
+      const response = await fetch(state.teamRepoUrl);
+      if (!response.ok) throw new Error("No se pudo acceder a la URL del repositorio.");
+      const data = await response.json();
+      setState(prev => ({ ...prev, teamRepoContext: data }));
+    } catch (err: any) {
+      setOrgError(err.message || "Error al buscar el repositorio");
+    } finally {
+      setFetchingRepo(false);
+    }
+  };
+
   const handleVerifyGemini = async () => {
     setVerifyingGemini(true);
     setGeminiError(null);
     try {
-      const success = await testGeminiConnection(state.geminiKey);
-      if (success) {
+      const result = await testGeminiConnection(state.geminiKey);
+      if (result.success) {
         setState(prev => ({ ...prev, isGeminiVerified: true }));
       } else {
-        setGeminiError("Respuesta inesperada del modelo.");
+        setGeminiError(result.message);
       }
     } catch (err: any) {
-      setGeminiError(err.message || "Error de conexión");
+      setGeminiError(err.message || "Error al conectar con Gemini");
     } finally {
       setVerifyingGemini(false);
     }
@@ -61,7 +180,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
     }
   };
 
-  const isFormValid = orgForm.companyName && orgForm.industry && orgForm.techStack && orgForm.teamHistory;
+  const isFormValid = orgForm.companyName && orgForm.industry && orgForm.techStack;
   const canStart = state.isGeminiVerified && (state.mode === 'Single' || state.isClaudeVerified) && isFormValid && state.projectIdea;
 
   const handleStart = () => {
@@ -76,7 +195,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
   return (
     <div className="max-w-6xl mx-auto py-8 px-4 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <header className="text-center space-y-2">
-        <h1 className="text-4xl font-bold tracking-tight text-white">AI Software Lifecycle Framework</h1>
+        <h1 className="text-4xl font-bold tracking-tight text-white">Ingeniería de Software aumentada con IA</h1>
         <p className="text-slate-400 max-w-2xl mx-auto">Configura tu entorno y contexto organizacional para comenzar el ciclo de desarrollo asistido por IA.</p>
       </header>
 
@@ -96,7 +215,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
               )}
             >
               <div className="font-bold text-white">Single LLM</div>
-              <div className="text-xs text-slate-400">Todo el ciclo es ejecutado por Gemini 1.5 Pro.</div>
+              <div className="text-xs text-slate-400">Todo el ciclo es ejecutado por Gemini 3 Flash.</div>
             </button>
             <button
               onClick={() => setState(prev => ({ ...prev, mode: 'Dual' }))}
@@ -133,14 +252,14 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
                 />
                 <button
                   onClick={handleVerifyGemini}
-                  disabled={verifyingGemini || !state.geminiKey}
+                  disabled={verifyingGemini}
                   className="bg-gemini-blue hover:bg-blue-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 >
                   {verifyingGemini ? <Loader2 className="animate-spin" size={18} /> : "Probar"}
                 </button>
               </div>
               {state.isGeminiVerified && <div className="flex items-center gap-1 text-xs text-green-400"><CheckCircle2 size={14} /> Verificada</div>}
-              {geminiError && <div className="flex items-center gap-1 text-xs text-red-400"><XCircle size={14} /> {geminiError}</div>}
+              {geminiError && <div className="flex items-start gap-1 text-xs text-red-400 whitespace-pre-wrap"><XCircle size={14} className="mt-0.5 shrink-0" /> {geminiError}</div>}
             </div>
 
             <div className="space-y-3">
@@ -162,7 +281,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
                 </button>
               </div>
               {state.isClaudeVerified && <div className="flex items-center gap-1 text-xs text-green-400"><CheckCircle2 size={14} /> Verificada</div>}
-              {claudeError && <div className="flex items-center gap-1 text-xs text-red-400"><XCircle size={14} /> {claudeError}</div>}
+              {claudeError && <div className="flex items-start gap-1 text-xs text-red-400 whitespace-pre-wrap"><XCircle size={14} className="mt-0.5 shrink-0" /> {claudeError}</div>}
             </div>
           </div>
 
@@ -180,20 +299,30 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
 
         {/* Section 3: Organization Context */}
         <section className="glass-panel p-6 space-y-6 lg:col-span-3">
-          <div className="flex items-center gap-2 text-white font-semibold">
-            <Users className="text-teal-400" size={20} />
-            <h2>Contexto de la Organización y del Equipo</h2>
+          <div className="flex items-center justify-between gap-2 text-white font-semibold">
+            <div className="flex items-center gap-2">
+              <Users className="text-teal-400" size={20} />
+              <h2>Contexto de la Organización y del Equipo</h2>
+            </div>
+            <div className="flex items-center gap-3">
+              {orgError && <span className="text-[10px] text-red-400 font-medium truncate max-w-[200px]">{orgError}</span>}
+              <label className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg cursor-pointer transition-colors">
+                {parsingFile ? <Loader2 className="animate-spin text-teal-400" size={14} /> : <Upload className="text-teal-400" size={14} />}
+                <span className="text-xs text-slate-300 font-medium">Cargar Perfil</span>
+                <input type="file" className="hidden" onChange={handleFileUpload} accept=".json,.txt" />
+              </label>
+            </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="space-y-4 md:col-span-2">
+          <div className="grid grid-cols-1 gap-6">
+            <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-xs font-medium text-slate-400 uppercase">Empresa</label>
                   <input
                     value={orgForm.companyName}
                     onChange={(e) => setOrgForm({ ...orgForm, companyName: e.target.value })}
-                    className="w-full bg-teal-dark/50 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-400"
+                    className="w-full bg-teal-dark/50 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-400 transition-colors"
                     placeholder="Nombre de la organización"
                   />
                 </div>
@@ -202,10 +331,37 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
                   <input
                     value={orgForm.industry}
                     onChange={(e) => setOrgForm({ ...orgForm, industry: e.target.value })}
-                    className="w-full bg-teal-dark/50 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-400"
+                    className="w-full bg-teal-dark/50 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-400 transition-colors"
                     placeholder="Ej: Fintech, Salud, E-commerce"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-400 uppercase">URL Repositorio del Equipo (JSON)</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Link className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                    <input
+                      value={state.teamRepoUrl}
+                      onChange={(e) => setState(prev => ({ ...prev, teamRepoUrl: e.target.value }))}
+                      className="w-full bg-teal-dark/50 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-teal-400 transition-colors"
+                      placeholder="https://raw.githubusercontent.com/.../history.json"
+                    />
+                  </div>
+                  <button
+                    onClick={handleFetchRepo}
+                    disabled={fetchingRepo || !state.teamRepoUrl}
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-bold text-teal-400 transition-all flex items-center gap-2 whitespace-nowrap"
+                  >
+                    {fetchingRepo ? <Loader2 className="animate-spin" size={14} /> : "Conectar"}
+                  </button>
+                </div>
+                {state.teamRepoContext && (
+                  <div className="flex items-center gap-1.5 text-[10px] text-green-400 font-bold bg-green-400/5 px-2 py-1 rounded w-fit mt-1">
+                    <CheckCircle2 size={10} /> REPOSITORIO CONECTADO
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -239,31 +395,6 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
                 </div>
               </div>
             </div>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase flex items-center gap-1">
-                  <Zap size={12} className="text-yellow-400" /> Velocidad Promedio (SP)
-                </label>
-                <input
-                  type="number"
-                  value={orgForm.averageVelocity}
-                  onChange={(e) => setOrgForm({ ...orgForm, averageVelocity: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-teal-dark/50 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-400"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase flex items-center gap-1">
-                  <History size={12} className="text-teal-400" /> Historial del Equipo (RAG Base)
-                </label>
-                <textarea
-                  value={orgForm.teamHistory}
-                  onChange={(e) => setOrgForm({ ...orgForm, teamHistory: e.target.value })}
-                  className="w-full bg-teal-dark/50 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-400 h-[210px] resize-none"
-                  placeholder="Pega aquí backlogs pasados, retrospectivas, decisiones técnicas previas..."
-                />
-              </div>
-            </div>
           </div>
         </section>
 
@@ -293,20 +424,3 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
     </div>
   );
 };
-
-const Loader2 = ({ size, className }: { size: number, className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={cn("lucide lucide-loader-2", className)}
-  >
-    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-  </svg>
-);
