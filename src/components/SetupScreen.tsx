@@ -7,7 +7,7 @@ import { cn } from '../lib/utils';
 interface SetupScreenProps {
   state: AppState;
   setState: React.Dispatch<React.SetStateAction<AppState>>;
-  onStart: () => void;
+  onStart: (updatedState: AppState) => void;
 }
 
 export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onStart }) => {
@@ -66,7 +66,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
           Texto a analizar:
           ${text}`;
 
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${state.geminiKey.trim()}`, {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${state.geminiKey.trim()}`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -184,12 +184,13 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
   const canStart = state.isGeminiVerified && (state.mode === 'Single' || state.isClaudeVerified) && isFormValid && state.projectIdea;
 
   const handleStart = () => {
-    setState(prev => ({
-      ...prev,
+    const updatedState = {
+      ...state,
       orgContext: orgForm,
-      phases: prev.phases.map((p, i) => i === 0 ? { ...p, status: 'waiting' } : p)
-    }));
-    onStart();
+      phases: state.phases.map((p, i) => i === 0 ? { ...p, status: 'waiting' as const } : p)
+    };
+    setState(updatedState);
+    onStart(updatedState);
   };
 
   return (
@@ -215,7 +216,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
               )}
             >
               <div className="font-bold text-white">Single LLM</div>
-              <div className="text-xs text-slate-400">Todo el ciclo es ejecutado por Gemini 3 Flash.</div>
+              <div className="text-xs text-slate-400">Todo el ciclo es ejecutado por Gemini 3.5 Flash.</div>
             </button>
             <button
               onClick={() => setState(prev => ({ ...prev, mode: 'Dual' }))}
@@ -337,27 +338,46 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
                 </div>
               </div>
 
-              <div className="space-y-2">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-slate-400 uppercase">URL Repositorio del Equipo (JSON)</label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Link className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                    <input
-                      value={state.teamRepoUrl}
-                      onChange={(e) => setState(prev => ({ ...prev, teamRepoUrl: e.target.value }))}
-                      className="w-full bg-teal-dark/50 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-teal-400 transition-colors"
-                      placeholder="https://raw.githubusercontent.com/.../history.json"
-                    />
-                  </div>
+                <div className="flex items-center gap-3">
+                  <span className={cn("text-[10px] font-bold uppercase tracking-wider", !state.ragActive ? "text-teal-400" : "text-slate-500")}>Sin contexto RAG</span>
                   <button
-                    onClick={handleFetchRepo}
-                    disabled={fetchingRepo || !state.teamRepoUrl}
-                    className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-bold text-teal-400 transition-all flex items-center gap-2 whitespace-nowrap"
+                    onClick={() => setState(prev => ({ ...prev, ragActive: !prev.ragActive }))}
+                    className={cn(
+                      "w-10 h-5 rounded-full p-1 transition-colors relative",
+                      state.ragActive ? "bg-teal-400" : "bg-slate-700"
+                    )}
                   >
-                    {fetchingRepo ? <Loader2 className="animate-spin" size={14} /> : "Conectar"}
+                    <div className={cn(
+                      "w-3 h-3 bg-white rounded-full transition-transform",
+                      state.ragActive ? "translate-x-5" : "translate-x-0"
+                    )} />
                   </button>
+                  <span className={cn("text-[10px] font-bold uppercase tracking-wider", state.ragActive ? "text-teal-400" : "text-slate-500")}>Con contexto RAG</span>
                 </div>
-                {state.teamRepoContext && (
+              </div>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Link className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                  <input
+                    value={state.teamRepoUrl}
+                    disabled={!state.ragActive}
+                    onChange={(e) => setState(prev => ({ ...prev, teamRepoUrl: e.target.value }))}
+                    className="w-full bg-teal-dark/50 border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-teal-400 transition-colors disabled:opacity-50"
+                    placeholder="https://raw.githubusercontent.com/.../history.json"
+                  />
+                </div>
+                <button
+                  onClick={handleFetchRepo}
+                  disabled={fetchingRepo || !state.teamRepoUrl || !state.ragActive}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-bold text-teal-400 transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
+                >
+                  {fetchingRepo ? <Loader2 className="animate-spin" size={14} /> : "Conectar"}
+                </button>
+              </div>
+              {state.teamRepoContext && state.ragActive && (
                   <div className="flex items-center gap-1.5 text-[10px] text-green-400 font-bold bg-green-400/5 px-2 py-1 rounded w-fit mt-1">
                     <CheckCircle2 size={10} /> REPOSITORIO CONECTADO
                   </div>
@@ -398,6 +418,36 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
           </div>
         </section>
 
+        {/* Experiment Mode */}
+        <section className="glass-panel p-6 space-y-4 lg:col-span-3">
+          <div className="flex items-center gap-2 text-white font-semibold">
+            <History className="text-purple-400" size={20} />
+            <h2>Modo de Experimento</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button
+              onClick={() => setState(prev => ({ ...prev, experimentMode: 'full' }))}
+              className={cn(
+                "p-4 rounded-xl border-2 text-left transition-all",
+                state.experimentMode === 'full' ? "border-teal-400 bg-teal-400/10" : "border-white/5 bg-white/5 hover:bg-white/10"
+              )}
+            >
+              <div className="font-bold text-white">Ciclo Completo</div>
+              <div className="text-sm text-slate-400">Ejecuta las 9 fases del ciclo de desarrollo tradicional.</div>
+            </button>
+            <button
+              onClick={() => setState(prev => ({ ...prev, experimentMode: 'research' }))}
+              className={cn(
+                "p-4 rounded-xl border-2 text-left transition-all",
+                state.experimentMode === 'research' ? "border-purple-400 bg-purple-400/10" : "border-white/5 bg-white/5 hover:bg-white/10"
+              )}
+            >
+              <div className="font-bold text-white uppercase tracking-wider">Experimento AIASE</div>
+              <div className="text-sm text-slate-400">Análisis focalizado: Backlog, Estimación y Priorización (Etapas 1-3).</div>
+            </button>
+          </div>
+        </section>
+
         {/* Project Idea */}
         <section className="glass-panel p-6 space-y-4 lg:col-span-3">
           <div className="flex items-center gap-2 text-white font-semibold">
@@ -416,7 +466,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
               disabled={!canStart}
               className="bg-teal-400 hover:bg-teal-500 disabled:opacity-30 disabled:cursor-not-allowed text-teal-dark px-8 py-3 rounded-xl font-bold text-lg transition-all transform hover:scale-105 active:scale-95"
             >
-              Iniciar Ciclo de Desarrollo
+              {state.experimentMode === 'research' ? "Iniciar Experimento" : "Iniciar Ciclo de Desarrollo"}
             </button>
           </div>
         </section>

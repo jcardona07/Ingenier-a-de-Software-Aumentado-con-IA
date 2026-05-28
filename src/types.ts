@@ -25,10 +25,26 @@ export interface Phase {
   status: PhaseStatus;
   artifact?: any;
   rejectionReason?: string;
+  regenerations?: number;
+}
+
+export interface ExperimentMetric {
+  phaseId: number;
+  phaseName: string;
+  model: string;
+  ragActive: boolean;
+  durationSeconds: number;
+  attempts: number;
+  finalDecision: string;
+  artifactAtApproval?: any;
+  manualEditsCount?: number;
+  totalItemsCount?: number;
 }
 
 export interface AppState {
   mode: 'Single' | 'Dual';
+  experimentMode: 'full' | 'research';
+  ragActive: boolean;
   geminiKey: string;
   claudeKey: string;
   isGeminiVerified: boolean;
@@ -39,13 +55,15 @@ export interface AppState {
   currentPhaseIndex: number;
   phases: Phase[];
   projectIdea: string;
+  experimentMetrics: ExperimentMetric[];
 }
 
 export const INITIAL_PHASES: Phase[] = [
-  { id: 1, name: "Visión", specialty: "Descubrimiento de Producto", agentName: "Agente 1", model: 'Gemini', status: 'locked' },
-  { id: 2, name: "Backlog", specialty: "Historias de Usuario y Requerimientos", agentName: "Agente 2", model: 'Gemini', status: 'locked' },
-  { id: 3, name: "Estimación", specialty: "Estimación Ágil", agentName: "Agente 3", model: 'Claude', status: 'locked' },
-  { id: 4, name: "Priorización", specialty: "Alineación de Valor de Negocio", agentName: "Agente 4", model: 'Claude', status: 'locked' },
+  { id: 0, name: "Visión", specialty: "Descubrimiento del Producto", agentName: "Agente de Visión", model: 'Gemini', status: 'locked' },
+  { id: 1, name: "Backlog", specialty: "Generación de Historias de Usuario", agentName: "Agente de Backlog", model: 'Gemini', status: 'locked' },
+  { id: 2, name: "Clasificación", specialty: "Matriz de Decisión IA vs Tradicional", agentName: "Agente de Clasificación", model: 'Gemini', status: 'locked' },
+  { id: 3, name: "Estimación", specialty: "Analogía Contextualizada con RAG", agentName: "Agente de Estimación", model: 'Claude', status: 'locked' },
+  { id: 4, name: "Priorización", specialty: "Valor Neto Ajustado por Riesgo", agentName: "Agente de Priorización", model: 'Claude', status: 'locked' },
   { id: 5, name: "Arquitectura", specialty: "Diseño de Sistema y DevSecOps", agentName: "Agente 5", model: 'Claude', status: 'locked' },
   { id: 6, name: "Diseño", specialty: "Diseño de API e Interfaz", agentName: "Agente 6", model: 'Claude', status: 'locked' },
   { id: 7, name: "Código", specialty: "Implementación Full-stack", agentName: "Agente 7", model: 'Gemini', status: 'locked' },

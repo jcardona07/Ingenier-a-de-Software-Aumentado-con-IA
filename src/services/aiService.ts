@@ -6,7 +6,7 @@ export async function testGeminiConnection(apiKey: string): Promise<{ success: b
   console.log('Probando Gemini con clave:', apiKey.substring(0, 8) + '...');
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey.trim()}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey.trim()}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,7 +131,7 @@ export async function callGemini(apiKey: string, systemPrompt: string, userPromp
         };
       }
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey.trim()}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey.trim()}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -5,12 +5,13 @@ import { cn } from '../lib/utils';
 
 interface StepIndicatorProps {
   phaseNumber: number;
+  label?: string;
   status: PhaseStatus;
   isActive: boolean;
   onClick: () => void;
 }
 
-export const StepIndicator: React.FC<StepIndicatorProps> = ({ phaseNumber, status, isActive, onClick }) => {
+export const StepIndicator: React.FC<StepIndicatorProps> = ({ phaseNumber, label, status, isActive, onClick }) => {
   const getStatusStyles = () => {
     switch (status) {
       case 'locked':
@@ -59,7 +60,7 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({ phaseNumber, statu
         "text-[10px] font-medium uppercase tracking-wider",
         isActive ? "text-white" : "text-slate-400"
       )}>
-        Fase {phaseNumber}
+        {label || `Fase ${phaseNumber}`}
       </span>
     </button>
   );

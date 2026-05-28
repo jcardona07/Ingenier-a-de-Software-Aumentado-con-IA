@@ -3,7 +3,7 @@ import { Phase, AppState } from '../types';
 import { callGemini, callClaude } from '../services/aiService';
 import { PROMPTS } from '../constants';
 import { ArtifactViewer } from './ArtifactViewer';
-import { Play, Check, X, Edit3, Loader2, AlertTriangle, User, BrainCircuit } from 'lucide-react';
+import { Play, Check, X, Edit3, Loader2, AlertTriangle, User, BrainCircuit, Database } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface AgentScreenProps {
@@ -21,36 +21,114 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
   const [editedArtifact, setEditedArtifact] = useState<any>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectionInput, setShowRejectionInput] = useState(false);
+  
+  // Metrics local state
+  const [attempts, setAttempts] = useState(1);
+  const [lastRunStartTime, setLastRunStartTime] = useState<number | null>(null);
+  const [totalPhaseDuration, setTotalPhaseDuration] = useState(0);
+
+  // Reset metrics when phase changes
+  useEffect(() => {
+    setAttempts(1);
+    setLastRunStartTime(null);
+    setTotalPhaseDuration(0);
+    setError(null);
+    setEditMode(false);
+    setEditedArtifact(null);
+
+    // Auto-run Phase 1 if in research mode and has no artifact
+    if (state.experimentMode === 'research' && currentPhase.id === 1 && currentPhase.status === 'waiting' && !currentPhase.artifact) {
+      runAgent();
+    }
+  }, [state.currentPhaseIndex]);
 
   const getModelForPhase = (phase: Phase) => {
     if (state.mode === 'Single') return 'Gemini';
+    if (phase.id === 0 || phase.id === 1 || phase.id === 2) return 'Gemini';
+    if (phase.id === 3 || phase.id === 4) return 'Claude';
     return phase.model;
   };
 
   const runAgent = async (customInstructions?: string) => {
     setIsRunning(true);
     setError(null);
+    const startTime = Date.now();
+    setLastRunStartTime(startTime);
     
     try {
       const model = getModelForPhase(currentPhase);
       const apiKey = model === 'Gemini' ? state.geminiKey : state.claudeKey;
       const systemPrompt = (PROMPTS as any)[`AGENTE_${currentPhase.id}`];
       
-      // Build context
-      let context = `INFORMACIÓN DE CONTEXTO CRÍTICA (UTILIZA ESTOS DATOS PARA CUMPLIR ESTÁNDARES Y CONSISTENCIA):\n\n`;
-      context += `1. PERFIL ORGANIZACIONAL (Empresa, Sector, Stack, Estándares, DoD, Restricciones):\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
-      context += `2. HISTORIAL DEL EQUIPO (Contexto narrativo):\n${state.orgContext?.teamHistory}\n\n`;
-      if (state.teamRepoContext) {
-        context += `3. REPOSITORIO DEL EQUIPO (Datos estructurados JSON con antecedentes técnicos y de gestión):\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
-      }
-      context += `4. IDEA DEL PROYECTO ACTUAL (Objetivo del ciclo):\n${state.projectIdea}\n\n`;
-      
-      // Accumulate approved artifacts
-      state.phases.slice(0, state.currentPhaseIndex).forEach(p => {
-        if (p.artifact) {
-          context += `ARTEFACTO APROBADO FASE ${p.id} (${p.name}):\n${JSON.stringify(p.artifact, null, 2)}\n\n`;
+      // Build context custom per phase based on requirements
+      let context = "";
+      if (currentPhase.id === 1) {
+        context += `PERFIL ORGANIZACIONAL:\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
+        if (state.ragActive && state.teamRepoContext) {
+          context += `HISTORIAL DEL EQUIPO DESDE RAG:\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+        } else if (state.orgContext?.teamHistory) {
+          context += `HISTORIAL DEL EQUIPO (Contexto narrativo):\n${state.orgContext?.teamHistory}\n\n`;
         }
-      });
+        const phase0Artifact = state.phases.find(p => p.id === 0)?.artifact;
+        if (phase0Artifact) {
+          context += `VISIÓN APROBADA DEL PRODUCTO:\n${JSON.stringify(phase0Artifact, null, 2)}\n\n`;
+        }
+      } else if (currentPhase.id === 2) {
+        context += `INSTRUCCIÓN CRÍTICA: El siguiente es el Smart Product Backlog aprobado por el investigador. Clasifica cada historia usando la Matriz de Decisión sin modificar ningún campo existente.\n\n`;
+        const phase1Artifact = state.phases.find(p => p.id === 1)?.artifact;
+        context += `SMART PRODUCT BACKLOG APROBADO A CLASIFICAR:\n${JSON.stringify(phase1Artifact || {}, null, 2)}\n\n`;
+        context += `CONTEXTO ORGANIZACIONAL:\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
+      } else if (currentPhase.id === 3) {
+        context += `PERFIL ORGANIZACIONAL:\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
+        if (state.ragActive && state.teamRepoContext) {
+          context += `HISTORIAL DEL EQUIPO RAG:\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+        } else if (state.orgContext?.teamHistory) {
+          context += `HISTORIAL DEL EQUIPO:\n${state.orgContext?.teamHistory}\n\n`;
+        }
+        const phase0Artifact = state.phases.find(p => p.id === 0)?.artifact;
+        if (phase0Artifact) {
+          context += `VISIÓN DEL PRODUCTO:\n${JSON.stringify(phase0Artifact, null, 2)}\n\n`;
+        }
+        const phase2Artifact = state.phases.find(p => p.id === 2)?.artifact;
+        if (phase2Artifact) {
+          context += `BACKLOG CLASIFICADO APROBADO:\n${JSON.stringify(phase2Artifact, null, 2)}\n\n`;
+        }
+      } else if (currentPhase.id === 4) {
+        context += `PERFIL ORGANIZACIONAL (ÉNFASIS EN NORMATIVAS Y RESTRICCIONES):\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
+        if (state.ragActive && state.teamRepoContext) {
+          context += `HISTORIAL DEL EQUIPO RAG:\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+        } else if (state.orgContext?.teamHistory) {
+          context += `HISTORIAL DEL EQUIPO:\n${state.orgContext?.teamHistory}\n\n`;
+        }
+        const phase0Artifact = state.phases.find(p => p.id === 0)?.artifact;
+        if (phase0Artifact) {
+          context += `VISIÓN DEL PRODUCTO:\n${JSON.stringify(phase0Artifact, null, 2)}\n\n`;
+        }
+        const phase2Artifact = state.phases.find(p => p.id === 2)?.artifact;
+        if (phase2Artifact) {
+          context += `BACKLOG CLASIFICADO APROBADO:\n${JSON.stringify(phase2Artifact, null, 2)}\n\n`;
+        }
+        const phase3Artifact = state.phases.find(p => p.id === 3)?.artifact;
+        if (phase3Artifact) {
+          context += `ESTIMACIONES APROBADAS:\n${JSON.stringify(phase3Artifact, null, 2)}\n\n`;
+        }
+      } else {
+        // Default critical organizational context for other phases
+        context = `INFORMACIÓN DE CONTEXTO CRÍTICA (UTILIZA ESTOS DATOS PARA CUMPLIR ESTÁNDARES Y CONSISTENCIA):\n\n`;
+        context += `1. PERFIL ORGANIZACIONAL (Empresa, Sector, Stack, Estándares, DoD, Restricciones):\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
+        context += `2. HISTORIAL DEL EQUIPO (Contexto narrativo):\n${state.orgContext?.teamHistory}\n\n`;
+        if (state.teamRepoContext && state.ragActive) {
+          context += `3. REPOSITORIO DEL EQUIPO (Datos estructurados JSON con antecedentes técnicos y de gestión):\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+        }
+        context += `4. IDEA DEL PROYECTO ACTUAL (Objetivo del ciclo):\n${state.projectIdea}\n\n`;
+        
+        // Accumulate approved artifacts
+        state.phases.slice(0, state.currentPhaseIndex).forEach(p => {
+          if (p.artifact) {
+            context += `ARTEFACTO APROBADO FASE ${p.id} (${p.name}):\n${JSON.stringify(p.artifact, null, 2)}\n\n`;
+          }
+        });
+      }
 
       if (customInstructions) {
         context += `INSTRUCCIONES DE CORRECCIÓN (RECHAZO ANTERIOR):\n${customInstructions}\n\n`;
@@ -92,6 +170,10 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
       if (currentPhase.id === 4) {
         console.log("Agente 4 respuesta recibida");
       }
+
+      const endTime = Date.now();
+      const runDuration = (endTime - startTime) / 1000;
+      setTotalPhaseDuration(prev => prev + runDuration);
 
       // Robust JSON Extraction
       const extractJSON = (text: string) => {
@@ -155,10 +237,14 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
 
       setState(prev => {
         const newPhases = [...prev.phases];
+        const oldPhase = newPhases[state.currentPhaseIndex];
+        const hadArtifact = !!oldPhase.artifact;
+        const currentRegenerations = oldPhase.regenerations || 0;
         newPhases[state.currentPhaseIndex] = {
-          ...newPhases[state.currentPhaseIndex],
+          ...oldPhase,
           status: 'waiting',
-          artifact: parsedArtifact
+          artifact: parsedArtifact,
+          regenerations: hadArtifact ? currentRegenerations + 1 : currentRegenerations
         };
         return { ...prev, phases: newPhases };
       });
@@ -171,6 +257,38 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
   };
 
   const handleApprove = () => {
+    // Record metrics if in research mode
+    if (state.experimentMode === 'research' && [1, 2, 3, 4].includes(currentPhase.id)) {
+      const wasModified = currentPhase.artifact && editedArtifact && JSON.stringify(currentPhase.artifact) !== JSON.stringify(editedArtifact);
+      const decision = attempts > 1 ? 'Rechazado y Regenerado' : (editMode || wasModified ? 'Modificado antes de aprobar' : 'Aprobado directamente');
+      
+      // Stats for manual edits
+      let manualEditsCount = 0;
+      let totalItemsCount = 0;
+      if (currentPhase.id === 1 && currentPhase.artifact?.user_stories) {
+        manualEditsCount = currentPhase.artifact.user_stories.filter((s: any) => s.isManualEdit).length;
+        totalItemsCount = currentPhase.artifact.user_stories.length;
+      }
+
+      const metric: any = {
+        phaseId: currentPhase.id,
+        phaseName: currentPhase.name,
+        model: getModelForPhase(currentPhase),
+        ragActive: state.ragActive,
+        durationSeconds: totalPhaseDuration,
+        attempts: attempts,
+        finalDecision: decision,
+        artifactAtApproval: currentPhase.artifact,
+        manualEditsCount,
+        totalItemsCount
+      };
+      
+      setState(prev => ({
+        ...prev,
+        experimentMetrics: [...prev.experimentMetrics, metric]
+      }));
+    }
+
     setState(prev => {
       const newPhases = [...prev.phases];
       newPhases[state.currentPhaseIndex].status = 'approved';
@@ -185,6 +303,7 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
   };
 
   const handleReject = () => {
+    setAttempts(prev => prev + 1);
     setShowRejectionInput(true);
   };
 
@@ -214,6 +333,14 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
     setEditMode(false);
   };
 
+  const updateArtifactFromViewer = (newData: any) => {
+    setState(prev => {
+      const newPhases = [...prev.phases];
+      newPhases[state.currentPhaseIndex].artifact = newData;
+      return { ...prev, phases: newPhases };
+    });
+  };
+
   const isGemini = getModelForPhase(currentPhase) === 'Gemini';
 
   return (
@@ -234,7 +361,32 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
                 {getModelForPhase(currentPhase)}
               </span>
             </div>
-            <p className="text-slate-400 font-medium">{currentPhase.specialty}</p>
+            <p className="text-slate-400 font-medium mb-2">{currentPhase.specialty}</p>
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              {state.mode === 'Single' ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gemini-blue/10 border border-gemini-blue/30 text-gemini-blue animate-fade-in">
+                  Single LLM Gemini
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-claude-violet/10 border border-claude-violet/30 text-claude-violet animate-fade-in">
+                  Dual LLM
+                </span>
+              )}
+              <span className={cn(
+                "flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border transition-all duration-300",
+                state.ragActive 
+                  ? "bg-green-500/10 border-green-500/20 text-green-400" 
+                  : "bg-slate-500/10 border-slate-500/20 text-slate-400"
+              )}>
+                <Database size={10} />
+                {state.ragActive ? "RAG Activo" : "RAG Inactivo"}
+              </span>
+              {currentPhase.regenerations && currentPhase.regenerations >= 1 ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-orange-500/10 border border-orange-500/30 text-orange-400 animate-pulse">
+                  Regeneraciones: {currentPhase.regenerations}
+                </span>
+              ) : null}
+            </div>
           </div>
           
           <div className="flex items-center gap-3">
@@ -302,7 +454,11 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
             </div>
           ) : (
             <div className="glass-panel p-8 min-h-[400px]">
-              <ArtifactViewer data={currentPhase.artifact} phaseId={currentPhase.id} />
+              <ArtifactViewer 
+                data={currentPhase.artifact} 
+                phaseId={currentPhase.id} 
+                onUpdateArtifact={updateArtifactFromViewer}
+              />
             </div>
           )}
         </div>
