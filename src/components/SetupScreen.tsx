@@ -19,6 +19,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
   const [orgError, setOrgError] = useState<string | null>(null);
   const [fetchingRepo, setFetchingRepo] = useState(false);
   const [parsingFile, setParsingFile] = useState(false);
+  const [pastedJson, setPastedJson] = useState("");
 
   const [orgForm, setOrgForm] = useState<OrgContext>({
     companyName: '',
@@ -134,15 +135,38 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
     setFetchingRepo(true);
     setOrgError(null);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 10000);
+
     try {
-      const response = await fetch(state.teamRepoUrl);
+      const response = await fetch(state.teamRepoUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (!response.ok) throw new Error("No se pudo acceder a la URL del repositorio.");
       const data = await response.json();
       setState(prev => ({ ...prev, teamRepoContext: data }));
     } catch (err: any) {
-      setOrgError(err.message || "Error al buscar el repositorio");
+      if (err.name === 'AbortError') {
+        setOrgError("La URL tardó demasiado en responder. Verifica que sea una URL raw de GitHub y vuelve a intentar.");
+      } else {
+        setOrgError(err.message || "Error al buscar el repositorio");
+      }
     } finally {
+      clearTimeout(timeoutId);
       setFetchingRepo(false);
+    }
+  };
+
+  const handleLoadPastedJson = () => {
+    setOrgError(null);
+    if (!pastedJson.trim()) return;
+
+    try {
+      const data = JSON.parse(pastedJson.trim());
+      setState(prev => ({ ...prev, teamRepoContext: data }));
+    } catch (err: any) {
+      setOrgError("Error: El JSON provisto es inválido. Verifica el formato e intenta nuevamente.");
     }
   };
 
@@ -383,6 +407,38 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({ state, setState, onSta
                   </div>
                 )}
               </div>
+
+              <div className="space-y-2 pt-2">
+                <label className="text-xs font-medium text-slate-400 uppercase block">Pega el JSON del equipo aquí si la URL no carga</label>
+                <textarea
+                  value={pastedJson}
+                  disabled={!state.ragActive}
+                  onChange={(e) => setPastedJson(e.target.value)}
+                  className="w-full bg-teal-dark/50 border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-teal-400 h-24 resize-none font-mono text-xs disabled:opacity-50"
+                  placeholder='{ "velocity": { "avg_points_per_sprint": 20 }, "projects": [] }'
+                />
+                <button
+                  onClick={handleLoadPastedJson}
+                  disabled={!pastedJson.trim() || !state.ragActive}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-bold text-teal-400 transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  Cargar JSON
+                </button>
+              </div>
+
+              {state.teamRepoContext && state.ragActive && (
+                <div className="mt-2 space-y-1 bg-green-400/5 border border-green-400/20 rounded-lg p-3">
+                  <div className="flex items-center gap-1.5 text-xs text-green-400 font-bold">
+                    <CheckCircle2 size={12} /> REPOSITORIO CONECTADO
+                  </div>
+                  <div className="text-xs text-slate-300">
+                    <span className="font-semibold text-green-400">Proyectos encontrados:</span> {state.teamRepoContext.projects?.length || 0}
+                  </div>
+                  <div className="text-xs text-slate-300">
+                    <span className="font-semibold text-green-400 font-medium">Historias encontradas:</span> {state.teamRepoContext.projects?.reduce((acc: number, p: any) => acc + (p.user_stories?.length || 0), 0) || 0}
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-xs font-medium text-slate-400 uppercase">Tecnologías del Equipo</label>

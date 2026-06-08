@@ -84,6 +84,45 @@ export const ExperimentSummary: React.FC<ExperimentSummaryProps> = ({ state, onC
     const sprint3Capacity = sprintPlan?.sprint_3?.capacity_used_percent || 0;
     const anySprintExceeds70 = sprint1Capacity > 70 || sprint2Capacity > 70 || sprint3Capacity > 70;
 
+    // Calculate avg_confidence as mode of estimations' confidence_levels
+    const confValues = estimations.map((e: any) => {
+      const level = String(e.confidence_level || 'bajo').toLowerCase();
+      if (level === 'alto' || level === 'alta') return 3;
+      if (level === 'medio') return 2;
+      return 1;
+    });
+
+    let avgConfidence = 'bajo';
+    if (confValues.length > 0) {
+      const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
+      confValues.forEach((val: number) => {
+        counts[val] = (counts[val] || 0) + 1;
+      });
+      let maxCount = -1;
+      let modeVal = 1;
+      [1, 2, 3].forEach(val => {
+        if (counts[val] > maxCount) {
+          maxCount = counts[val];
+          modeVal = val;
+        }
+      });
+      if (modeVal === 3) avgConfidence = 'alto';
+      else if (modeVal === 2) avgConfidence = 'medio';
+      else avgConfidence = 'bajo';
+    }
+
+    const velocitySource = velocityReference.basis || null;
+
+    const storiesWithRagReference = estimations.filter((est: any) => {
+      const rId = est.reference_story_id;
+      return rId !== null && rId !== undefined && rId !== "";
+    }).length;
+
+    const classificationAiIdentified = storiesClass.filter((s: any) => {
+      const score = s.classification?.score;
+      return score !== undefined && score !== null && Number(score) > 0;
+    }).length;
+
     const exportData = {
       config: {
         modoLLM: state.mode,
@@ -107,7 +146,11 @@ export const ExperimentSummary: React.FC<ExperimentSummaryProps> = ({ state, onC
         totalStoryPoints: estimationArtifact?.total_points || 0,
         sprintsEstimados: estimationArtifact?.estimated_sprints || 0,
         sprintExcedeCapacidad70: anySprintExceeds70,
-        historiasEditadasManualmente: editedStories.length
+        historiasEditadasManualmente: editedStories.length,
+        avg_confidence: avgConfidence,
+        velocity_source: velocitySource,
+        stories_with_rag_reference: storiesWithRagReference,
+        classification_ai_identified: classificationAiIdentified
       }
     };
 

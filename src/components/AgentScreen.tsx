@@ -13,6 +13,52 @@ interface AgentScreenProps {
 
 import { VisualEditor } from './VisualEditor';
 
+const buildCompactRAG = (repo: any): string => {
+  if (!repo) return "";
+  const velocity_avg = repo.velocity?.avg_points_per_sprint ?? "N/A";
+  const overall_accuracy = repo.patterns?.estimation_precision?.overall_accuracy ?? "N/A";
+  const tendency = repo.patterns?.estimation_precision?.tendency ?? "N/A";
+
+  let storiesStr = "";
+  const projects = repo.projects || [];
+  if (Array.isArray(projects)) {
+    projects.forEach((proj: any) => {
+      const userStories = proj.user_stories || [];
+      if (Array.isArray(userStories)) {
+        userStories.forEach((story: any) => {
+          const id = story.id ?? "N/A";
+          const title = story.title ?? "N/A";
+          const estimated_points = story.estimated_points ?? "N/A";
+          const real_points = story.real_points ?? "N/A";
+          const task_type = story.task_type ?? "N/A";
+          const ext_int = story.external_integration ?? story.external_integration_needed ?? "N/A";
+          const difficulty = story.difficulty ?? "N/A";
+          const lessons = Array.isArray(story.lessons) ? story.lessons.join(", ") : (story.lessons ?? "N/A");
+          
+          storiesStr += `ID: ${id} | Título: ${title} | Puntos estimados: ${estimated_points} | Puntos reales: ${real_points} | Tipo tarea: ${task_type} | Integración externa: ${ext_int} | Dificultad: ${difficulty} | Lección: ${lessons}\n`;
+        });
+      }
+    });
+  }
+
+  const ext_add_points = repo.patterns?.adjustment_factors?.external_integration?.avg_additional_points ?? "N/A";
+  const tech_mult = repo.patterns?.adjustment_factors?.new_technology?.multiplier ?? "N/A";
+  const reg_add_points = repo.patterns?.adjustment_factors?.regulatory_compliance?.avg_additional_points ?? "N/A";
+
+  return `ANALOGÍAS DISPONIBLES DEL HISTORIAL DEL EQUIPO:
+Velocidad real del equipo: ${velocity_avg} SP por sprint
+Precisión histórica: ${overall_accuracy}
+Tendencia: ${tendency}
+
+Historias completadas disponibles para analogía:
+${storiesStr || "Ninguna historia disponible para analogía.\n"}
+Factores de ajuste del equipo:
+- Integración externa: suma ${ext_add_points} puntos
+- Tecnología nueva: multiplica por ${tech_mult}
+- Cumplimiento normativo: suma ${reg_add_points} puntos`;
+};
+
+
 export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => {
   const currentPhase = state.phases[state.currentPhaseIndex];
   const [isRunning, setIsRunning] = useState(false);
@@ -81,7 +127,13 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
       } else if (currentPhase.id === 3) {
         context += `PERFIL ORGANIZACIONAL:\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
         if (state.ragActive && state.teamRepoContext) {
-          context += `HISTORIAL DEL EQUIPO RAG:\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+          const compactRAG = buildCompactRAG(state.teamRepoContext);
+          if (model === 'Claude') {
+            context += `HISTORIAL REAL DEL EQUIPO PARA ESTIMACIÓN POR ANALOGÍA - OBLIGATORIO: Debes buscar en este historial las historias más similares a las que vas a estimar. Usa los campos user_stories de cada proyecto para encontrar analogías. Los campos real_points y estimated_points te muestran la precisión histórica del equipo. Los campos external_integration y complexity_factors te ayudan a identificar similitudes. Este contexto es tu fuente principal de referencia y debes citarlo en reference_story_id.\n${compactRAG}\n\n`;
+            context += "BACKLOG A ESTIMAR (busca analogías del historial para cada una de estas historias):\n" + JSON.stringify(state.phases.find(p => p.id === 2)?.artifact?.user_stories?.map((s: any) => ({id: s.id, title: s.title, description: s.description, classification: s.classification})) || [], null, 2) + "\n\n";
+          } else {
+            context += `HISTORIAL DEL EQUIPO RAG:\n${compactRAG}\n\n`;
+          }
         } else if (state.orgContext?.teamHistory) {
           context += `HISTORIAL DEL EQUIPO:\n${state.orgContext?.teamHistory}\n\n`;
         }
@@ -94,9 +146,20 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
           context += `BACKLOG CLASIFICADO APROBADO:\n${JSON.stringify(phase2Artifact, null, 2)}\n\n`;
         }
       } else if (currentPhase.id === 4) {
+        let calcVel = 20;
+        if (state.orgContext?.averageVelocity && state.orgContext.averageVelocity > 0) {
+          calcVel = state.orgContext.averageVelocity;
+        } else if (state.teamRepoContext?.velocity?.avg_points_per_sprint) {
+          calcVel = state.teamRepoContext.velocity.avg_points_per_sprint;
+        }
+        context += `VELOCIDAD OFICIAL DEL EQUIPO PARA ESTE EXPERIMENTO: ${calcVel} story points por sprint.\n\n`;
         context += `PERFIL ORGANIZACIONAL (ÉNFASIS EN NORMATIVAS Y RESTRICCIONES):\n${JSON.stringify(state.orgContext, null, 2)}\n\n`;
         if (state.ragActive && state.teamRepoContext) {
-          context += `HISTORIAL DEL EQUIPO RAG:\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+          if (model === 'Claude') {
+            context += `HISTORIAL REAL DEL EQUIPO PARA PRIORIZACIÓN CONTEXTUALIZADA - OBLIGATORIO: Usa el campo patterns.prioritization_patterns para calibrar los criterios de priorización con los patrones reales del equipo. Usa known_risk_patterns para identificar riesgos específicos de este equipo.\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+          } else {
+            context += `HISTORIAL DEL EQUIPO RAG:\n${JSON.stringify(state.teamRepoContext, null, 2)}\n\n`;
+          }
         } else if (state.orgContext?.teamHistory) {
           context += `HISTORIAL DEL EQUIPO:\n${state.orgContext?.teamHistory}\n\n`;
         }
@@ -234,6 +297,12 @@ export const AgentScreen: React.FC<AgentScreenProps> = ({ state, setState }) => 
       }
 
       console.log(`JSON Devuelto por el Agente ${currentPhase.id}:`, JSON.stringify(parsedArtifact, null, 2));
+
+      if (currentPhase.id === 4 && parsedArtifact?.prioritized_backlog) {
+        parsedArtifact.prioritized_backlog = parsedArtifact.prioritized_backlog
+          .sort((a: any, b: any) => (b.priority_score || 0) - (a.priority_score || 0))
+          .map((item: any, index: number) => ({ ...item, position: index + 1 }));
+      }
 
       setState(prev => {
         const newPhases = [...prev.phases];
